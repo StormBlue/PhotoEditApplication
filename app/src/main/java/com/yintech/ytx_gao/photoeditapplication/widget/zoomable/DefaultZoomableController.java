@@ -60,6 +60,169 @@ public class DefaultZoomableController
     }
 
     /**
+     * Maps point from the view's to the image's relative coordinate system.
+     * This takes into account the zoomable transformation.
+     */
+    public PointF mapViewToImage(PointF viewPoint) {
+        float[] points = mTempValues;
+        points[0] = viewPoint.x;
+        points[1] = viewPoint.y;
+        mActiveTransform.invert(mActiveTransformInverse);
+        mActiveTransformInverse.mapPoints(points, 0, points, 0, 1);
+        mapAbsoluteToRelative(points, points, 1);
+        return new PointF(points[0], points[1]);
+    }
+
+    /**
+     * Maps point from the image's relative to the view's coordinate system.
+     * This takes into account the zoomable transformation.
+     */
+    public PointF mapImageToView(PointF imagePoint) {
+        float[] points = mTempValues;
+        points[0] = imagePoint.x;
+        points[1] = imagePoint.y;
+        mapRelativeToAbsolute(points, points, 1);
+        mActiveTransform.mapPoints(points, 0, points, 0, 1);
+        return new PointF(points[0], points[1]);
+    }
+
+    private void mapAbsoluteToRelative(float[] destPoints, float[] srcPoints, int numPoints) {
+        for (int i = 0; i < numPoints; i++) {
+            destPoints[i * 2 + 0] = (srcPoints[i * 2 + 0] - mImageBounds.left) / mImageBounds.width();
+            destPoints[i * 2 + 1] = (srcPoints[i * 2 + 1] - mImageBounds.top) / mImageBounds.height();
+        }
+    }
+
+    private void mapRelativeToAbsolute(float[] destPoints, float[] srcPoints, int numPoints) {
+        for (int i = 0; i < numPoints; i++) {
+            destPoints[i * 2 + 0] = srcPoints[i * 2 + 0] * mImageBounds.width() + mImageBounds.left;
+            destPoints[i * 2 + 1] = srcPoints[i * 2 + 1] * mImageBounds.height() + mImageBounds.top;
+        }
+    }
+
+    /**
+     * Gets the zoomable transformation
+     * Internal matrix is exposed for performance reasons and is not to be modified by the callers.
+     */
+    @Override
+    public Matrix getTransform() {
+        return mActiveTransform;
+    }
+
+    /**
+     * Sets the zoomable transformation. Cancels the current gesture if one is happening.
+     */
+    public void setTransform(Matrix activeTransform) {
+        if (mGestureDetector.isGestureInProgress()) {
+            mGestureDetector.reset();
+        }
+        mActiveTransform.set(activeTransform);
+    }
+
+    /**
+     * Notifies controller of the received touch event.
+     */
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        if (mIsEnabled) {
+            return mGestureDetector.onTouchEvent(event);
+        }
+        return false;
+    }
+
+    public void zoomToImagePoint(float scale, PointF imagePoint) {
+        if (mGestureDetector.isGestureInProgress()) {
+            mGestureDetector.reset();
+        }
+        scale = limit(scale, mMinScaleFactor, mMaxScaleFactor);
+        float[] points = mTempValues;
+        points[0] = imagePoint.x;
+        points[1] = imagePoint.y;
+        mapRelativeToAbsolute(points, points, 1);
+        mActiveTransform.setScale(scale, scale, points[0], points[1]);
+        mActiveTransform.postTranslate(
+                mViewBounds.centerX() - points[0],
+                mViewBounds.centerY() - points[1]);
+        limitTranslation();
+    }
+
+    /**
+     * Gets the current scale factor.
+     */
+    @Override
+    public float getScaleFactor() {
+        mActiveTransform.getValues(mTempValues);
+        return mTempValues[Matrix.MSCALE_X];
+    }
+
+    private void limitScale(float pivotX, float pivotY) {
+        float currentScale = getScaleFactor();
+        float targetScale = limit(currentScale, mMinScaleFactor, mMaxScaleFactor);
+        if (targetScale != currentScale) {
+            float scale = targetScale / currentScale;
+            mActiveTransform.postScale(scale, scale, pivotX, pivotY);
+        }
+    }
+
+    private boolean limitTranslation() {
+        RectF bounds = mTransformedImageBounds;
+        bounds.set(mImageBounds);
+        mActiveTransform.mapRect(bounds);
+
+        float offsetLeft = getOffset(bounds.left, bounds.width(), mViewBounds.width());
+        float offsetTop = getOffset(bounds.top, bounds.height(), mViewBounds.height());
+        if (offsetLeft != bounds.left || offsetTop != bounds.top) {
+            mActiveTransform.postTranslate(offsetLeft - bounds.left, offsetTop - bounds.top);
+            return true;
+        }
+        return false;
+    }
+
+    private float getOffset(float offset, float imageDimension, float viewDimension) {
+        float diff = viewDimension - imageDimension;
+        return (diff > 0) ? diff / 2 : limit(offset, diff, 0);
+    }
+
+    private float limit(float value, float min, float max) {
+        return Math.min(Math.max(min, value), max);
+    }
+
+      /* TransformGestureDetector.Listener methods  */
+
+    @Override
+    public void onGestureBegin(TransformGestureDetector detector) {
+        mPreviousTransform.set(mActiveTransform);
+    }
+
+    @Override
+    public void onGestureUpdate(TransformGestureDetector detector) {
+        mActiveTransform.set(mPreviousTransform);
+        if (mIsRotationEnabled) {
+            float angle = detector.getRotation() * (float) (180 / Math.PI);
+            mActiveTransform.postRotate(angle, detector.getPivotX(), detector.getPivotY());
+        }
+        if (mIsScaleEnabled) {
+            float scale = detector.getScale();
+            mActiveTransform.postScale(scale, scale, detector.getPivotX(), detector.getPivotY());
+        }
+        limitScale(detector.getPivotX(), detector.getPivotY());
+        if (mIsTranslationEnabled) {
+            mActiveTransform.postTranslate(detector.getTranslationX(), detector.getTranslationY());
+        }
+        if (limitTranslation()) {
+            mGestureDetector.restartGesture();
+        }
+        if (mListener != null) {
+            mListener.onTransformChanged(mActiveTransform);
+        }
+    }
+
+    @Override
+    public void onGestureEnd(TransformGestureDetector detector) {
+        mPreviousTransform.set(mActiveTransform);
+    }
+
+    /**
      * Rests the controller.
      */
     public void reset() {
@@ -191,169 +354,6 @@ public class DefaultZoomableController
      */
     public void setMaxScaleFactor(float maxScaleFactor) {
         mMaxScaleFactor = maxScaleFactor;
-    }
-
-    /**
-     * Maps point from the view's to the image's relative coordinate system.
-     * This takes into account the zoomable transformation.
-     */
-    public PointF mapViewToImage(PointF viewPoint) {
-        float[] points = mTempValues;
-        points[0] = viewPoint.x;
-        points[1] = viewPoint.y;
-        mActiveTransform.invert(mActiveTransformInverse);
-        mActiveTransformInverse.mapPoints(points, 0, points, 0, 1);
-        mapAbsoluteToRelative(points, points, 1);
-        return new PointF(points[0], points[1]);
-    }
-
-    /**
-     * Maps point from the image's relative to the view's coordinate system.
-     * This takes into account the zoomable transformation.
-     */
-    public PointF mapImageToView(PointF imagePoint) {
-        float[] points = mTempValues;
-        points[0] = imagePoint.x;
-        points[1] = imagePoint.y;
-        mapRelativeToAbsolute(points, points, 1);
-        mActiveTransform.mapPoints(points, 0, points, 0, 1);
-        return new PointF(points[0], points[1]);
-    }
-
-    private void mapAbsoluteToRelative(float[] destPoints, float[] srcPoints, int numPoints) {
-        for (int i = 0; i < numPoints; i++) {
-            destPoints[i * 2 + 0] = (srcPoints[i * 2 + 0] - mImageBounds.left) / mImageBounds.width();
-            destPoints[i * 2 + 1] = (srcPoints[i * 2 + 1] - mImageBounds.top) / mImageBounds.height();
-        }
-    }
-
-    private void mapRelativeToAbsolute(float[] destPoints, float[] srcPoints, int numPoints) {
-        for (int i = 0; i < numPoints; i++) {
-            destPoints[i * 2 + 0] = srcPoints[i * 2 + 0] * mImageBounds.width() + mImageBounds.left;
-            destPoints[i * 2 + 1] = srcPoints[i * 2 + 1] * mImageBounds.height() + mImageBounds.top;
-        }
-    }
-
-    /**
-     * Gets the zoomable transformation
-     * Internal matrix is exposed for performance reasons and is not to be modified by the callers.
-     */
-    @Override
-    public Matrix getTransform() {
-        return mActiveTransform;
-    }
-
-    /**
-     * Sets the zoomable transformation. Cancels the current gesture if one is happening.
-     */
-    public void setTransform(Matrix activeTransform) {
-        if (mGestureDetector.isGestureInProgress()) {
-            mGestureDetector.reset();
-        }
-        mActiveTransform.set(activeTransform);
-    }
-
-    /**
-     * Notifies controller of the received touch event.
-     */
-    @Override
-    public boolean onTouchEvent(MotionEvent event) {
-        if (mIsEnabled) {
-            return mGestureDetector.onTouchEvent(event);
-        }
-        return false;
-    }
-
-    public void zoomToImagePoint(float scale, PointF imagePoint) {
-        if (mGestureDetector.isGestureInProgress()) {
-            mGestureDetector.reset();
-        }
-        scale = limit(scale, mMinScaleFactor, mMaxScaleFactor);
-        float[] points = mTempValues;
-        points[0] = imagePoint.x;
-        points[1] = imagePoint.y;
-        mapRelativeToAbsolute(points, points, 1);
-        mActiveTransform.setScale(scale, scale, points[0], points[1]);
-        mActiveTransform.postTranslate(
-                mViewBounds.centerX() - points[0],
-                mViewBounds.centerY() - points[1]);
-        limitTranslation();
-    }
-
-  /* TransformGestureDetector.Listener methods  */
-
-    @Override
-    public void onGestureBegin(TransformGestureDetector detector) {
-        mPreviousTransform.set(mActiveTransform);
-    }
-
-    @Override
-    public void onGestureUpdate(TransformGestureDetector detector) {
-        mActiveTransform.set(mPreviousTransform);
-        if (mIsRotationEnabled) {
-            float angle = detector.getRotation() * (float) (180 / Math.PI);
-            mActiveTransform.postRotate(angle, detector.getPivotX(), detector.getPivotY());
-        }
-        if (mIsScaleEnabled) {
-            float scale = detector.getScale();
-            mActiveTransform.postScale(scale, scale, detector.getPivotX(), detector.getPivotY());
-        }
-        limitScale(detector.getPivotX(), detector.getPivotY());
-        if (mIsTranslationEnabled) {
-            mActiveTransform.postTranslate(detector.getTranslationX(), detector.getTranslationY());
-        }
-        if (limitTranslation()) {
-            mGestureDetector.restartGesture();
-        }
-        if (mListener != null) {
-            mListener.onTransformChanged(mActiveTransform);
-        }
-    }
-
-    @Override
-    public void onGestureEnd(TransformGestureDetector detector) {
-        mPreviousTransform.set(mActiveTransform);
-    }
-
-    /**
-     * Gets the current scale factor.
-     */
-    @Override
-    public float getScaleFactor() {
-        mActiveTransform.getValues(mTempValues);
-        return mTempValues[Matrix.MSCALE_X];
-    }
-
-    private void limitScale(float pivotX, float pivotY) {
-        float currentScale = getScaleFactor();
-        float targetScale = limit(currentScale, mMinScaleFactor, mMaxScaleFactor);
-        if (targetScale != currentScale) {
-            float scale = targetScale / currentScale;
-            mActiveTransform.postScale(scale, scale, pivotX, pivotY);
-        }
-    }
-
-    private boolean limitTranslation() {
-        RectF bounds = mTransformedImageBounds;
-        bounds.set(mImageBounds);
-        mActiveTransform.mapRect(bounds);
-
-        float offsetLeft = getOffset(bounds.left, bounds.width(), mViewBounds.width());
-        float offsetTop = getOffset(bounds.top, bounds.height(), mViewBounds.height());
-        if (offsetLeft != bounds.left || offsetTop != bounds.top) {
-            mActiveTransform.postTranslate(offsetLeft - bounds.left, offsetTop - bounds.top);
-            return true;
-        }
-        return false;
-    }
-
-    private float getOffset(float offset, float imageDimension, float viewDimension) {
-        float diff = viewDimension - imageDimension;
-        return (diff > 0) ? diff / 2 : limit(offset, diff, 0);
-    }
-
-    private float limit(float value, float min, float max) {
-        return Math.min(Math.max(min, value), max);
     }
 
 }

@@ -70,50 +70,8 @@ public class MultiPointerGestureDetector {
         mListener = listener;
     }
 
-    /**
-     * Resets the component to the initial state.
-     */
-    public void reset() {
-        mGestureInProgress = false;
-        mCount = 0;
-        for (int i = 0; i < MAX_POINTERS; i++) {
-            mId[i] = MotionEvent.INVALID_POINTER_ID;
-        }
-    }
-
     protected boolean shouldStartGesture() {
         return true;
-    }
-
-    private void startGesture() {
-        if (!mGestureInProgress) {
-            mGestureInProgress = true;
-            if (mListener != null) {
-                mListener.onGestureBegin(this);
-            }
-        }
-    }
-
-    private void stopGesture() {
-        if (mGestureInProgress) {
-            mGestureInProgress = false;
-            if (mListener != null) {
-                mListener.onGestureEnd(this);
-            }
-        }
-    }
-
-    private int getPressedPointerIndex(MotionEvent event, int i) {
-        final int count = event.getPointerCount();
-        final int action = event.getActionMasked();
-        final int index = event.getActionIndex();
-        if (action == MotionEvent.ACTION_UP ||
-                action == MotionEvent.ACTION_POINTER_UP) {
-            if (i >= index) {
-                i++;
-            }
-        }
-        return (i < count) ? i : -1;
     }
 
     public boolean onTouchEvent(final MotionEvent event) {
@@ -172,6 +130,48 @@ public class MultiPointerGestureDetector {
             }
         }
         return true;
+    }
+
+    private int getPressedPointerIndex(MotionEvent event, int i) {
+        final int count = event.getPointerCount();
+        final int action = event.getActionMasked();
+        final int index = event.getActionIndex();
+        if (action == MotionEvent.ACTION_UP ||
+                action == MotionEvent.ACTION_POINTER_UP) {
+            if (i >= index) {
+                i++;
+            }
+        }
+        return (i < count) ? i : -1;
+    }
+
+    private void startGesture() {
+        if (!mGestureInProgress) {
+            mGestureInProgress = true;
+            if (mListener != null) {
+                mListener.onGestureBegin(this);
+            }
+        }
+    }
+
+    private void stopGesture() {
+        if (mGestureInProgress) {
+            mGestureInProgress = false;
+            if (mListener != null) {
+                mListener.onGestureEnd(this);
+            }
+        }
+    }
+
+    /**
+     * Resets the component to the initial state.
+     */
+    public void reset() {
+        mGestureInProgress = false;
+        mCount = 0;
+        for (int i = 0; i < MAX_POINTERS; i++) {
+            mId[i] = MotionEvent.INVALID_POINTER_ID;
+        }
     }
 
     /**

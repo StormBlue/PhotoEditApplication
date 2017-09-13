@@ -5,6 +5,7 @@ import android.graphics.Canvas;
 import android.graphics.Matrix;
 import android.support.annotation.Nullable;
 import android.util.AttributeSet;
+import android.util.Log;
 import android.view.MotionEvent;
 
 import com.yintech.ytx_gao.photoeditapplication.widget.zoomable.DefaultZoomableController;
@@ -43,6 +44,7 @@ public class ZoomableImageView extends android.support.v7.widget.AppCompatImageV
     protected void onDraw(Canvas canvas) {
         int saveCount = canvas.save();
         canvas.concat(mZoomableController.getTransform());
+        Log.d(TAG, "onDraw" + mZoomableController.getTransform());
         super.onDraw(canvas);
         canvas.restoreToCount(saveCount);
     }
@@ -84,6 +86,6 @@ public class ZoomableImageView extends android.support.v7.widget.AppCompatImageV
 
     @Override
     public void onTransformChanged(Matrix transform) {
-
+        invalidate();
     }
 }
